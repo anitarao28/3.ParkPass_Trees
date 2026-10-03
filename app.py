@@ -198,8 +198,8 @@ with st.sidebar:
 
 # ----------------------------------------------------------------------------- header + tabs
 st.title("🌳 Decision Trees Lab: Planning Next Season's Campaign")
-tab0, tab1, tab2, tab3, tab4 = st.tabs(["Start here", "Stop 1 · Where should the bundle go?", "Stop 2 · Who is worth an offer?",
-                                        "Stop 3 · Should we pay for age data?", "Stop 4 · Most valuable customers?"])
+tab0, tab1, tab2, tab3, tab4 = st.tabs(["Start here", "Stop 1 · The bundle", "Stop 2 · Who gets an offer",
+                                        "Stop 3 · Age data", "Stop 4 · Valuable customers"])
 
 # ============================================================================= START
 with tab0:
@@ -279,70 +279,72 @@ with tab2:
                 "and which version should each get? Someone objects: <i>\"the tree is only about 72% accurate, why trust it?\"</i></div>", unsafe_allow_html=True)
     tree_all = DecisionTreeClassifier(max_leaf_nodes=6, random_state=0).fit(df[X_CP], df.Bought)
     tree70 = DecisionTreeClassifier(max_leaf_nodes=6, random_state=0).fit(train[X_CP], train.Bought)
+    acc = (tree70.predict(test[X_CP]) == test.Bought).mean()
     seg2 = SEG.copy()
     seg2["P"] = tree_all.predict_proba(seg2[X_CP])[:, 1]
+    seg2["Label"] = np.where(seg2.P > 0.5, "Tree says \"buys\"", "Tree says \"doesn't buy\"")
     seg2["Profit per buyer"] = PASS_MARGIN - BUNDLE_COST * seg2.Bundle
     seg2["Profit per offer"] = seg2.P * seg2["Profit per buyer"] - OFFER_COST
 
+    def plan_by_labels():
+        """Contact a channel only if the tree labels a version "buys"; send the version with the higher chance of buying."""
+        total = 0
+        for ch in ["Mail", "Email", "Park"]:
+            s_ = seg2[seg2.Channel == ch]
+            best = s_.loc[s_.P.idxmax()]
+            if best.P > 0.5:
+                total += best["Profit per offer"] * OFFERS
+        return total
+
+    def plan_by_profit():
+        """Contact a channel if some version has positive expected profit; send the most profitable version."""
+        total = 0
+        for ch in ["Mail", "Email", "Park"]:
+            s_ = seg2[seg2.Channel == ch]
+            best = s_.loc[s_["Profit per offer"].idxmax()]
+            if best["Profit per offer"] > 0:
+                total += best["Profit per offer"] * OFFERS
+        return total
+
     left, right = st.columns([1.25, 2.4], gap="large")
     with left:
-        cutoff = st.slider("Call a customer a \"buyer\" if P(buy) is above…", 0.05, 0.95, 0.50, 0.01, format="%.2f")
-        seg2["Label"] = np.where(seg2.P > cutoff, "Labeled \"buys\"", "Labeled \"doesn't buy\"")
-
-        def campaign_profit(cut, use_labels):
-            total = 0
-            for ch in ["Mail", "Email", "Park"]:
-                s = seg2[seg2.Channel == ch]
-                if use_labels:
-                    best = s.loc[s.P.idxmax()]
-                    if best.P > cut:
-                        total += best["Profit per offer"] * OFFERS
-                else:
-                    best = s.loc[s["Profit per offer"].idxmax()]
-                    if best["Profit per offer"] > 0:
-                        total += best["Profit per offer"] * OFFERS
-            return total
-
-        p_test = tree70.predict_proba(test[X_CP])[:, 1]
-        acc = ((p_test > cutoff).astype(int) == test.Bought).mean()
-        stat("Accuracy on hidden customers", f"{acc:.1%}", f"Guessing \"buys\" for everyone: {test.Bought.mean():.1%}")
-        stat("Campaign profit if you contact the segments labeled \"buys\"", f"${campaign_profit(cutoff, True):,.0f}", color=TEAL)
-        stat("Campaign profit if you contact every segment that pays", f"${campaign_profit(cutoff, False):,.0f}", color=TEAL)
-        st.caption(f"Each channel gets {OFFERS:,} offers of one version (the more profitable one), or none. The tree was grown on 70% of customers and checked on the other 30% for accuracy.")
+        st.markdown("#### Two ways to plan the campaign")
+        stat("Plan A: follow the tree's labels", f"${plan_by_labels():,.0f}",
+             "Contact a channel only where the tree says customers \"buy\"; send the version they're likelier to buy.", color=TEAL)
+        stat("Plan B: follow expected profit", f"${plan_by_profit():,.0f}",
+             "Contact a channel wherever an offer is expected to make money; send the more profitable version.", color=TEAL)
+        st.caption(f"Expected campaign profit, {OFFERS:,} offers per channel. Change the costs in the sidebar and watch both plans.")
+        st.divider()
+        stat("Tree accuracy on hidden customers", f"{acc:.1%}", f"Guessing \"buys\" for everyone: {test.Bought.mean():.1%}")
+        st.caption("Tree grown on 70% of customers and checked on the other 30%.")
     with right:
-        s = seg2.sort_values("Profit per offer", ascending=False)
+        s_ = seg2.sort_values("Profit per offer", ascending=False)
         fig = go.Figure()
-        for lab, color in [("Labeled \"buys\"", TEAL), ("Labeled \"doesn't buy\"", ORANGE)]:
-            d = s[s.Label == lab]
+        for lab, color in [("Tree says \"buys\"", TEAL), ("Tree says \"doesn't buy\"", ORANGE)]:
+            d = s_[s_.Label == lab]
             fig.add_bar(name=lab, x=d.Segment, y=d["Profit per offer"], marker_color=color,
-                        text=[f"${v:,.2f}<br>P={p:.0%}" for v, p in zip(d["Profit per offer"], d.P)], textposition="outside", textfont=dict(size=FONT - 2))
-        fig.update_xaxes(categoryorder="array", categoryarray=list(s.Segment))
-        fig.update_yaxes(tickprefix="$")
+                        text=[f"${v:,.2f}<br>{p:.0%} buy" for v, p in zip(d["Profit per offer"], d.P)], textposition="outside", textfont=dict(size=FONT - 2))
+        fig.update_xaxes(categoryorder="array", categoryarray=list(s_.Segment))
+        lo, hi = min(0, s_["Profit per offer"].min()), max(1, s_["Profit per offer"].max())
+        fig.update_yaxes(tickprefix="$", range=[lo * 1.25 if lo < 0 else 0, hi * 1.22])
         fig.add_hline(y=0, line_color=NAVY, line_width=1.5)
-        st.plotly_chart(plotly_style(fig, 420, "Expected profit per offer = P(buy) × profit per buyer − cost of the offer"), width="stretch")
-
-        cuts = np.round(np.arange(0.05, 0.951, 0.01), 2)
-        accs = [((p_test > c).astype(int) == test.Bought).mean() for c in cuts]
-        profs = [campaign_profit(c, True) / 1000 for c in cuts]
-        best = campaign_profit(cutoff, False) / 1000
-        fig2 = go.Figure()
-        fig2.add_scatter(x=cuts, y=accs, name="Accuracy (hidden customers)", line=dict(color=NAVY, width=3), yaxis="y1")
-        fig2.add_scatter(x=cuts, y=profs, name="Profit: contact segments labeled \"buys\"", line=dict(color=TEAL, width=3, shape="hv"), yaxis="y2")
-        fig2.add_scatter(x=[cuts[0], cuts[-1]], y=[best, best], name="Profit: contact every segment that pays", line=dict(color=TEAL, width=2, dash="dot"), yaxis="y2")
-        fig2.add_vline(x=cutoff, line_dash="dash", line_color=ORANGE)
-        fig2.update_layout(yaxis=dict(tickformat=".0%", title="Accuracy"), yaxis2=dict(overlaying="y", side="right", tickprefix="$", ticksuffix="K", tickformat=",.0f", title="Campaign profit", showgrid=False, rangemode="tozero"),
-                           xaxis=dict(title="Cutoff for calling someone a buyer", range=[0.03, 0.97]))
-        st.plotly_chart(plotly_style(fig2, 430, "Moving the cutoff: accuracy vs. profit"), width="stretch")
+        st.plotly_chart(plotly_style(fig, 470, "Expected profit per offer = chance of buying × profit per buyer − cost of the offer"), width="stretch")
+        tbl = s_[["Segment", "P", "Label", "Profit per buyer", "Profit per offer"]].copy()
+        tbl["Segment"] = tbl.Segment.str.replace("<br>", " + ")
+        tbl["Label"] = tbl.Label.str.replace("Tree says ", "")
+        tbl.columns = ["Segment", "Chance of buying", "Tree's label", "Profit per buyer", "Profit per offer"]
+        st.dataframe(tbl.style.format({"Chance of buying": "{:.1%}", "Profit per buyer": "${:,.0f}", "Profit per offer": "${:,.2f}"}),
+                     hide_index=True, width="stretch")
     group_questions([
-        "The tree labels two segments \"doesn't buy.\" Is either still worth an offer? Why does the yes/no label give the wrong business answer?",
-        "Raise the <b>cost of sending one offer</b> to $10, then try a $60 bundle cost. Which segment stops paying? Does the Email decision change?",
-        "Move the cutoff. Where is accuracy highest? Where is profit highest? Answer the objection: \"it's only 72% accurate.\"",
+        "The tree labels some segments \"doesn't buy.\" Is any of them still worth an offer? What does the yes/no label leave out?",
+        "Raise the <b>cost of sending one offer</b> to $10, then try a $60 bundle cost. Which segment stops paying? Does your plan for any channel change?",
+        "How would you respond to \"the tree is only about 72% accurate\"? Does it change your recommendation?",
     ])
 
 # ============================================================================= STOP 3
 with tab3:
     st.markdown("<div class='question'><b>The VP asks:</b> a data vendor offers to add every customer's age to our file, for a fee. "
-                "Their analyst says a tree using age is <b>more accurate</b> than ours. Should we buy it? Check their claim yourself.</div>", unsafe_allow_html=True)
+                "Their analyst says that with age, their tree reaches <b>over 76% accuracy</b>, compared with about 73% for ours. Should we buy it?</div>", unsafe_allow_html=True)
     SIZES = [2, 4, 6, 8, 10, 15, 20, 30, 50, 100, 200, "No limit"]
     left, right = st.columns([1.25, 2.4], gap="large")
     with left:
@@ -415,25 +417,14 @@ with tab3:
                 stat("Customers it learned from, at those ages", f"{a.Bought.mean():.0%} bought", f"{a.Bought.sum()} of {len(a)} customers")
                 stat("Hidden customers, at those ages", f"{b.Bought.mean():.0%} bought" if len(b) else "none", f"{b.Bought.sum()} of {len(b)} customers", color=ORANGE)
             else:
-                st.info("At this size the tree doesn't single out any ages in this segment. Let it grow bigger.")
+                st.info("At this size, the tree doesn't treat any ages differently in this segment.")
     else:
         st.info("Switch on the vendor's age data to see this.")
     group_questions([
-        "Was the vendor's accuracy claim true? Why is it misleading? (Try \"No limit\" with age on.)",
-        "Based on the hidden customers, would you pay for the age data? What would you want to see before paying for any new data?",
+        "The vendor says their tree is over 76% accurate. Can you find that number here? How much would you rely on it?",
+        "Would you pay for the age data? What would you want to see before paying for any new data?",
         "A colleague sees the importance chart and proposes an age-targeted campaign. What do you tell them?",
     ])
-    with st.expander("🔒 Reveal: open only when your instructor says so"):
-        st.markdown("The **Age** column is **random**: each customer's age was drawn by chance and has no connection to buying. "
-                    "Everything the big tree \"learned\" about age was luck among the customers it learned from. Training accuracy couldn't tell you that; only the hidden customers could.")
-        st.markdown("Don't believe it? Draw a brand-new set of random ages and watch the \"buyer ages\" change completely.")
-        b1, b2 = st.columns(2)
-        if b1.button("🎲 Draw new random ages"):
-            st.session_state.age_seed += 1
-            st.rerun()
-        if b2.button("↺ Back to the original ages"):
-            st.session_state.age_seed = 2026
-            st.rerun()
 
 # ============================================================================= STOP 4
 with tab4:
