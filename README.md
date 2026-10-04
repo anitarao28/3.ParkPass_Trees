@@ -4,8 +4,8 @@ An interactive version of the four-stop decision-trees lab on the park-pass data
 
 | Tab | Business question |
 |---|---|
-| Stop 1 | Where should the bundle go? (simple logit vs. tree; toggle the interaction term) |
-| Stop 2 | Who is worth an offer at all? (profit per offer; plan by the tree's labels vs. by expected profit) |
+| Stop 1 | Does the bundle work, and is it the same everywhere? (simple logit vs. tree; toggle the interaction term) |
+| Stop 2 | Who is worth an offer at all? (the tree's labels vs. expected profit per offer) |
 | Stop 3 | Should we pay for age data? (grow the tree; training vs. hidden-customer accuracy) |
 | Stop 4 | Who are our most valuable customers? (regression tree for spend; value per offer) |
 

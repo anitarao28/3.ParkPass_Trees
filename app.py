@@ -198,7 +198,7 @@ with st.sidebar:
 
 # ----------------------------------------------------------------------------- header + tabs
 st.title("🌳 Decision Trees Lab: Planning Next Season's Campaign")
-tab0, tab1, tab2, tab3, tab4 = st.tabs(["Start here", "Stop 1 · The bundle", "Stop 2 · Who gets an offer",
+tab0, tab1, tab2, tab3, tab4 = st.tabs(["Start here", "Stop 1 · Bundle effect", "Stop 2 · Who gets an offer",
                                         "Stop 3 · Age data", "Stop 4 · Valuable customers"])
 
 # ============================================================================= START
@@ -209,7 +209,7 @@ with tab0:
 ### You are the park's marketing analytics team
 Next season's season-pass campaign is being planned, and the VP of Marketing has four questions. Each tab is one **stop**:
 
-1. **Where should the bundle go?**
+1. **Does the bundle work, and is it the same everywhere?**
 2. **Who is worth an offer at all?**
 3. **Should we pay for age data?**
 4. **Who are our most valuable customers?**
@@ -226,51 +226,34 @@ The **business assumptions** in the left sidebar (profit per pass, bundle cost, 
 
 # ============================================================================= STOP 1
 with tab1:
-    st.markdown("<div class='question'><b>The VP asks:</b> the bundle costs money. In which channels should next season's offer include it? "
-                "A busy analyst fits the obvious logistic regression (Promo + Channel). Does a decision tree give the same advice?</div>", unsafe_allow_html=True)
+    st.markdown("<div class='question'><b>The VP asks:</b> does the bundle help or hurt season-pass sales, and is the answer the same in every channel? "
+                "A busy analyst fits the obvious logistic regression (Promo + Channel). Does a decision tree tell the same story?</div>", unsafe_allow_html=True)
     left, right = st.columns([1.25, 2.4], gap="large")
     with left:
         interaction = st.toggle("Add interaction term", value=False, help="Promo × Channel: lets the logit give the bundle a different effect in each channel.")
-        leaves1 = st.slider("Most segments (leaves) the tree may create", 2, 8, 6, key="leaves1")
         formula = "Bought ~ Promo * Channel" if interaction else "Bought ~ Promo + Channel"
+        st.markdown("**The logit being fit:**")
         st.code(formula, language=None)
+        leaves1 = st.slider("Most segments (leaves) the tree may create", 2, 8, 6, key="leaves1")
     logit = smf.logit(formula, data=df).fit(disp=0)
     tree1 = DecisionTreeClassifier(max_leaf_nodes=leaves1, random_state=0).fit(df[X_CP], df.Bought)
     seg1 = SEG.copy()
     seg1["Actual"] = [ACTUAL[(c, p)] for c, p in zip(seg1.Channel, seg1.Promo)]
     seg1["Logit"] = logit.predict(seg1).values
     seg1["Tree"] = tree1.predict_proba(seg1[X_CP])[:, 1]
-
-    rows = []
-    for ch in ["Mail", "Email", "Park"]:
-        s = seg1[seg1.Channel == ch].set_index("Promo")
-        lp, tp = s.Logit.idxmax(), s.Tree.idxmax()
-        rows.append({"Channel": ch, "Logit sends": lp, "Logit passes": round(s.loc[lp, "Actual"] * OFFERS),
-                     "Tree sends": tp, "Tree passes": round(s.loc[tp, "Actual"] * OFFERS)})
-    plans = pd.DataFrame(rows)
-    with left:
-        st.markdown("#### Whose advice sells more?")
-        st.caption(f"Each model picks the version it predicts sells better in each channel. Plans are scored with what customers actually did, {OFFERS:,} offers per channel.")
-        m1, m2 = st.columns(2)
-        with m1:
-            stat("Logit plan", f"{plans['Logit passes'].sum():,}", "passes sold", color=ORANGE)
-        with m2:
-            stat("Tree plan", f"{plans['Tree passes'].sum():,}", f"passes sold ({plans['Tree passes'].sum() - plans['Logit passes'].sum():+,})", color=TEAL)
     with right:
         fig = go.Figure()
         for name, color in [("Actual", SLATE), ("Logit", ORANGE), ("Tree", TEAL)]:
             fig.add_bar(name=name if name != "Actual" else "What customers actually did", x=seg1.Segment, y=seg1[name], marker_color=color,
                         text=[f"{v:.0%}" for v in seg1[name]], textposition="outside", textfont=dict(size=FONT - 2))
         fig.update_yaxes(tickformat=".0%", range=[0, 1.05])
-        st.plotly_chart(plotly_style(fig, 440, "Share who buy, by segment: what each model predicts"), width="stretch")
-        st.markdown("#### The two plans, channel by channel")
-        st.dataframe(plans, hide_index=True, width="stretch")
+        st.plotly_chart(plotly_style(fig, 460, "Share who buy, by segment: what each model predicts"), width="stretch")
     st.markdown("#### The tree")
     show_tree(tree1, X_CP)
     group_questions([
-        "What does each model tell you to do in the <b>Email</b> channel? Which one matches what Email customers actually did?",
-        "How many more passes does the tree's plan sell, and where does the difference come from?",
-        "Now switch on the interaction. What changes? What did the analyst need to know in advance, and how often would you know that before looking at data?",
+        "According to each model, does the bundle help or hurt in each channel? Which one matches what customers actually did?",
+        "Why can't the Promo + Channel logit show the bundle helping in one channel and hurting in another?",
+        "Switch on the interaction term. What changes? What did the analyst need to know in advance, and how often would you know that before looking at the data?",
     ])
 
 # ============================================================================= STOP 2
